@@ -14,6 +14,24 @@ import { formatIST } from '../tools/time.js';
 
 const { MessageMedia } = pkg;
 
+// In a conversation with Bengali/Banglish-flavored history, the model drifts back toward
+// that established momentum even when the current message is plain English — verified live:
+// a generic "match this message's language" reminder was not enough to stop it, but stating
+// the classification outright ("this message is in English") was. Bengali/Devanagari script
+// is unambiguous; Banglish/Hinglish (Latin script) is flagged by the presence of common
+// transliterated words, so a Latin-script message with none of them is treated as English.
+const BENGALI_SCRIPT = /[ঀ-৿]/;
+const DEVANAGARI_SCRIPT = /[ऀ-ॿ]/;
+const TRANSLITERATION_MARKERS = /\b(ki|re|bhai|acho|achi|achen|korbo|korchi|korle|korte|hobe|hoyeche|keno|tui|tumi|apni|kemon|bolo|bol|dhur|arre|yaar|kya|hai|hain|nahi|nahin|kar|karo|kaisa|kaise|kahan|thik|acha|accha)\b/i;
+
+function isClearlyEnglish(text) {
+  if (BENGALI_SCRIPT.test(text) || DEVANAGARI_SCRIPT.test(text)) return false;
+  return !TRANSLITERATION_MARKERS.test(text);
+}
+
+const ENGLISH_REMINDER =
+  '\n\n[This message is in English — reply only in English, plain casual text, no bold/bullets/headers, regardless of what language earlier messages in this chat used.]';
+
 export function registerAutoReplyHandler() {
   client.on('message', async (msg) => {
     try {
@@ -57,15 +75,35 @@ export function registerAutoReplyHandler() {
       } catch (err) {
         console.warn('[history] could not load persisted history, continuing without it:', err.message);
       }
-      const historyMessages = history.flatMap((turn) => [
-        { role: 'user', content: turn.userMessage },
-        { role: 'assistant', content: turn.reply },
-      ]);
+
+      let historyMessages;
+      if (history.length > 0) {
+        historyMessages = history.flatMap((turn) => [
+          { role: 'user', content: turn.userMessage },
+          { role: 'assistant', content: turn.reply },
+        ]);
+      } else {
+        // Nothing in AxioDB yet for this chat — either the very first message the bot has
+        // ever processed from them, or a fresh DB. Either way, AxioDB only knows about turns
+        // the bot itself has replied to; it has no record of whatever was actually said in
+        // this chat before the bot started running. Pull that real context straight from
+        // WhatsApp instead of replying blind on turn one.
+        try {
+          const chat = await msg.getChat();
+          const waMessages = await chat.fetchMessages({ limit: HISTORY_LIMIT });
+          historyMessages = waMessages
+            .filter((m) => m.body?.trim() && m.id._serialized !== msg.id._serialized)
+            .map((m) => ({ role: m.fromMe ? 'assistant' : 'user', content: m.body }));
+        } catch (err) {
+          console.warn('[history] could not fetch WhatsApp chat history, continuing without it:', err.message);
+          historyMessages = [];
+        }
+      }
 
       const promptMessages = [
         { role: 'system', content: PERSONA },
         ...historyMessages,
-        { role: 'user', content: msg.body },
+        { role: 'user', content: isClearlyEnglish(msg.body) ? `${msg.body}${ENGLISH_REMINDER}` : msg.body },
       ];
       console.log('[prompt]', { chatId: realNumber, messages: promptMessages });
 
