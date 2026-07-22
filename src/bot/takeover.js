@@ -1,6 +1,7 @@
 import { HUMAN_TAKEOVER_MINUTES, TAKEOVER_DURATION_PROMPT, TAKEOVER_MAX_WORDS_FOR_BARE_COMMAND } from '../tools/config.js';
 import { getReply } from '../models/getReply.js';
 import { replyInSelfChat } from './selfChat.js';
+import { formatIST } from '../tools/time.js';
 
 // Word-boundary match, not an exact phrase — catches natural phrasing like "please stop
 // the auto reply" or "start it again", not just the literal words "stop"/"start" alone.
@@ -58,7 +59,7 @@ export async function tryHandleTakeoverCommand(body) {
   if (isTakeoverPhrase(body, STOP_REGEX)) {
     const minutes = (await extractStopDuration(body)) ?? HUMAN_TAKEOVER_MINUTES;
     pausedUntil = Date.now() + minutes * 60_000;
-    const resumeAt = new Date(pausedUntil).toLocaleTimeString();
+    const resumeAt = formatIST(new Date(pausedUntil));
     console.log(
       `[takeover] human takeover — auto-reply disabled for ${minutes} min, ` +
         `will resume at ${resumeAt} (mention "start" to resume sooner)`,

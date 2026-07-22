@@ -11,6 +11,7 @@ A self-hosted WhatsApp agent that replies to your contacts as you — matching y
 ## Features
 
 - **Auto-reply as you** — replies to incoming WhatsApp messages using an LLM persona (your background, tone, and mannerisms, configured in `src/tools/config.js`). Matches the sender's language/script (English, Bengali, Hindi, Banglish, Hinglish) and formality level from conversation history.
+- **Web search & page scraping** — the auto-reply persona can call a `web_search` tool (a key-free lookup against DuckDuckGo's results page) and a `scrape_url` tool to look up current information — news, prices, recent events — it wouldn't otherwise know, then answers in character without mentioning it searched. No API key or signup needed for either; note this scrapes DuckDuckGo's HTML rather than using an official API, so it can break if their markup changes.
 - **Voice-note replies** — can reply with an actual voice note instead of text, using free neural TTS (Bengali/Hindi/English, Indian accents). Male voice by default; a contact can ask to switch to female (in any of the four supported languages/scripts) and that chat remembers the preference.
 - **Self-chat command center** — message yourself ("Message Yourself" chat in WhatsApp) to control the bot:
   - **Send messages**: *"send a voice message to Rahul saying I'll be 10 minutes late"* — parses the recipient (by contact name, or a full/partial phone number), message, and voice/gender want, then asks for confirmation before sending.

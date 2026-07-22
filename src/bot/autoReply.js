@@ -9,6 +9,8 @@ import { sendAsBot } from './botMessages.js';
 import { isAutoReplyPaused, getPausedUntil } from './takeover.js';
 import { parseReply, humanDelayMs } from './voiceReply.js';
 import { getVoiceGender, applyVoiceGenderCommand } from './voicePreference.js';
+import { WEB_TOOLS, executeToolCall, wantsForcedSearch, FORCE_WEB_SEARCH_TOOL_CHOICE } from '../tools/webSearch.js';
+import { formatIST } from '../tools/time.js';
 
 const { MessageMedia } = pkg;
 
@@ -22,7 +24,7 @@ export function registerAutoReplyHandler() {
       const chatId = msg.from;
 
       if (isAutoReplyPaused()) {
-        console.log(`[takeover] skipping auto-reply for ${chatId}, paused until ${new Date(getPausedUntil()).toISOString()}`);
+        console.log(`[takeover] skipping auto-reply for ${chatId}, paused until ${formatIST(new Date(getPausedUntil()))}`);
         return;
       }
 
@@ -67,9 +69,12 @@ export function registerAutoReplyHandler() {
       ];
       console.log('[prompt]', { chatId: realNumber, messages: promptMessages });
 
+      const toolChoice = wantsForcedSearch(msg.body) ? FORCE_WEB_SEARCH_TOOL_CHOICE : undefined;
+      if (toolChoice) console.log(`[tool] forcing web_search — "${msg.body}" explicitly asked for a search`);
+
       let text, model;
       try {
-        ({ text, model } = await getReply(promptMessages));
+        ({ text, model } = await getReply(promptMessages, { tools: WEB_TOOLS, executeTool: executeToolCall, toolChoice }));
       } catch {
         // getReply() already logged which provider(s) failed and why.
         await sendAsBot(msg.reply("Sorry, I couldn't process that right now — please try again shortly."));

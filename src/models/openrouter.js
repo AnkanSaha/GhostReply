@@ -1,5 +1,7 @@
 import { FREE_MODELS, LLM_REQUEST_TIMEOUT_MS, LLM_RATE_LIMIT_COOLDOWN_MS, OPENROUTER_MIN_INTERVAL_MS } from '../tools/config.js';
 import { throttle } from '../tools/rateLimiter.js';
+import { normalizeContent } from './normalizeContent.js';
+import { formatIST } from '../tools/time.js';
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -23,13 +25,13 @@ function parseRateLimitResetMs(res, bodyText) {
 
 // Tries each model in FREE_MODELS in order; returns the first successful reply.
 // Skips models still in a rate-limit cooldown. Throws only if every model fails/is on cooldown.
-export async function getAIReply(messages, { apiKey = process.env.OPENROUTER_API_KEY, models = FREE_MODELS, fetchImpl = fetch, paced = true } = {}) {
+export async function getAIReply(messages, { apiKey = process.env.OPENROUTER_API_KEY, models = FREE_MODELS, fetchImpl = fetch, paced = true, tools, toolChoice } = {}) {
   let lastError = new Error('no models available (all on rate-limit cooldown)');
 
   for (const model of models) {
     const cooldown = cooldownUntil.get(model);
     if (cooldown && Date.now() < cooldown) {
-      console.warn(`[openrouter] skipping ${model}, rate-limited until ${new Date(cooldown).toISOString()}`);
+      console.warn(`[openrouter] skipping ${model}, rate-limited until ${formatIST(new Date(cooldown))}`);
       continue;
     }
 
@@ -45,7 +47,7 @@ export async function getAIReply(messages, { apiKey = process.env.OPENROUTER_API
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ model, messages }),
+        body: JSON.stringify({ model, messages, ...(tools?.length ? { tools } : {}), ...(toolChoice ? { tool_choice: toolChoice } : {}) }),
         signal: controller.signal,
       });
 
@@ -55,17 +57,19 @@ export async function getAIReply(messages, { apiKey = process.env.OPENROUTER_API
         if (res.status === 429) {
           const resetAt = parseRateLimitResetMs(res, bodyText);
           cooldownUntil.set(model, resetAt);
-          console.warn(`[openrouter] ${model} rate-limited, cooling down until ${new Date(resetAt).toISOString()}`);
+          console.warn(`[openrouter] ${model} rate-limited, cooling down until ${formatIST(new Date(resetAt))}`);
         }
 
         throw new Error(`HTTP ${res.status}: ${bodyText}`);
       }
 
       const data = await res.json();
-      const text = data.choices?.[0]?.message?.content;
-      if (!text) throw new Error('empty response');
+      const message = data.choices?.[0]?.message;
+      const toolCalls = message?.tool_calls;
+      const text = normalizeContent(message?.content);
+      if (!text && !toolCalls?.length) throw new Error('empty response');
 
-      return { text, model };
+      return { text, model, toolCalls };
     } catch (err) {
       lastError = err;
       console.warn(`[openrouter] model ${model} failed: ${err.message}`);
