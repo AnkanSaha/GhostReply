@@ -1,6 +1,8 @@
 {
-  "name": "whatsapp-automate",
+  "name": "ghostreply",
   "version": "1.0.0",
+  "description": "A self-hosted WhatsApp automation agent that replies as you, sends voice notes, and executes natural-language commands (send, schedule, pause) from your own note-to-self chat — powered by free-tier LLMs.",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "engines": {
