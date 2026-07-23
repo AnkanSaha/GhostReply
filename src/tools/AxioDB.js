@@ -12,6 +12,7 @@ class ChatHistoryStore {
     this.personalChat = null;
     this.groupChats = null;
     this.schedules = null;
+    this.pendingMessages = null;
   }
 
   // Call once at startup before any other method is used.
@@ -21,10 +22,18 @@ class ChatHistoryStore {
     this.personalChat = await chatHistoryDB.createCollection('personalChat');
     this.groupChats = await chatHistoryDB.createCollection('groupChats');
     this.schedules = await chatHistoryDB.createCollection('schedules');
+    this.pendingMessages = await chatHistoryDB.createCollection('pendingMessages');
 
     await this.personalChat.newIndex('userId');
     await this.groupChats.newIndex('userId');
     await this.schedules.newIndex('time');
+    await this.pendingMessages.newIndex('chatId');
+
+    try {
+      await this.pendingMessages.delete({}).deleteMany();
+    } catch {
+      // nothing to clear — fine
+    }
   }
 
   collectionFor(chatId) {
@@ -94,6 +103,26 @@ class ChatHistoryStore {
   async deleteSchedule(documentId) {
     await this.schedules.delete({ documentId }).deleteOne();
   }
+
+  // Messages buffered during a chat's debounce window, waiting to be bundled into one
+  // LLM call once the window closes with no further message.
+  async savePendingMessage(chatId, body) {
+    await this.pendingMessages.insert({ chatId, body, createdAt: nowIST() });
+  }
+
+  // Oldest first, so a bundled prompt reads in the order they were actually sent.
+  async getPendingMessages(chatId) {
+    const result = await this.pendingMessages.query({ chatId }).Sort({ createdAt: 1 }).exec();
+    return result.data?.documents ?? [];
+  }
+
+  async clearPendingMessages(chatId) {
+    try {
+      await this.pendingMessages.delete({ chatId }).deleteMany();
+    } catch {
+      // nothing to clear — fine
+    }
+  }
 }
 
 const chatHistoryStore = new ChatHistoryStore();
@@ -128,4 +157,16 @@ export async function markScheduleFired(documentId, dateKey) {
 
 export async function deleteSchedule(documentId) {
   return chatHistoryStore.deleteSchedule(documentId);
+}
+
+export async function savePendingMessage(chatId, body) {
+  return chatHistoryStore.savePendingMessage(chatId, body);
+}
+
+export async function getPendingMessages(chatId) {
+  return chatHistoryStore.getPendingMessages(chatId);
+}
+
+export async function clearPendingMessages(chatId) {
+  return chatHistoryStore.clearPendingMessages(chatId);
 }
