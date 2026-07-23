@@ -11,13 +11,19 @@ const { MessageMedia } = pkg;
 // Exported so scheduler.js's own disambiguation flow uses the exact same cancel wording.
 export const CANCEL_REGEX = /\b(no|cancel|nevermind|never ?mind|stop|abort)\b/i;
 
-// Pending "message someone" action from the note-to-self chat — only one at a time.
-// { type: 'confirm', contactId, label, message, wantsVoice, spokenMessage, voiceGender }
-// or { type: 'disambiguate', candidates, message, wantsVoice, spokenMessage, voiceGender }
-let pendingSend = null;
+// Owns the pending "message someone" action from the note-to-self chat — only one at a
+// time. current: null, or { type: 'confirm', contactId, label, message, wantsVoice,
+// spokenMessage, voiceGender }, or { type: 'disambiguate', candidates, ...same fields }.
+class PendingSendState {
+  constructor() {
+    this.current = null;
+  }
+}
+
+const pendingSendState = new PendingSendState();
 
 export function hasPendingSend() {
-  return pendingSend !== null;
+  return pendingSendState.current !== null;
 }
 
 function confirmPrompt(pending) {
@@ -28,43 +34,43 @@ function confirmPrompt(pending) {
 export async function handlePendingSend(body) {
   const normalized = body.trim();
 
-  if (pendingSend.type === 'disambiguate') {
+  if (pendingSendState.current.type === 'disambiguate') {
     if (CANCEL_REGEX.test(normalized)) {
       console.log('[relay] disambiguation cancelled');
-      pendingSend = null;
+      pendingSendState.current = null;
       await replyInSelfChat('Cancelled.');
       return;
     }
     const idx = Number.parseInt(normalized, 10);
-    const candidate = Number.isInteger(idx) ? pendingSend.candidates[idx - 1] : null;
+    const candidate = Number.isInteger(idx) ? pendingSendState.current.candidates[idx - 1] : null;
     if (!candidate) {
       console.log(`[relay] invalid disambiguation choice: "${normalized}"`);
       await replyInSelfChat('Not a valid choice — reply with a number from the list, or "cancel".');
       return;
     }
     console.log(`[relay] disambiguation resolved to ${candidate.label}, awaiting confirmation`);
-    pendingSend = {
+    pendingSendState.current = {
       type: 'confirm',
       contactId: candidate.id,
       label: candidate.label,
-      message: pendingSend.message,
-      wantsVoice: pendingSend.wantsVoice,
-      spokenMessage: pendingSend.spokenMessage,
-      voiceGender: pendingSend.voiceGender,
+      message: pendingSendState.current.message,
+      wantsVoice: pendingSendState.current.wantsVoice,
+      spokenMessage: pendingSendState.current.spokenMessage,
+      voiceGender: pendingSendState.current.voiceGender,
     };
-    await replyInSelfChat(confirmPrompt(pendingSend));
+    await replyInSelfChat(confirmPrompt(pendingSendState.current));
     return;
   }
 
   // type === 'confirm' — interpreted by the model, not naive keyword matching: a reply like
   // "no no send, say X instead" contains both "no" and "send" as whole words, so simple
   // regex can't tell a real confirm from a rejection-with-replacement.
-  const decision = await interpretConfirmationReply(pendingSend.message, normalized);
+  const decision = await interpretConfirmationReply(pendingSendState.current.message, normalized);
   console.log('[relay] confirmation decision:', decision);
 
   if (decision.action === 'confirm') {
-    const { contactId, label, message, wantsVoice, spokenMessage, voiceGender } = pendingSend;
-    pendingSend = null;
+    const { contactId, label, message, wantsVoice, spokenMessage, voiceGender } = pendingSendState.current;
+    pendingSendState.current = null;
     try {
       if (wantsVoice) {
         const audioBuffer = await textToSpeech(spokenMessage || message, voiceGender);
@@ -80,18 +86,18 @@ export async function handlePendingSend(body) {
       await replyInSelfChat(`Failed to send: ${err.message}`);
     }
   } else if (decision.action === 'replace') {
-    console.log(`[relay] draft replaced for ${pendingSend.label}: "${decision.newMessage}"`);
+    console.log(`[relay] draft replaced for ${pendingSendState.current.label}: "${decision.newMessage}"`);
     // No re-transliteration on replace — the new content goes to TTS as-is if this was a
     // voice request. textToSpeech() still does its own script detection/fallback either way.
-    pendingSend = {
-      ...pendingSend,
+    pendingSendState.current = {
+      ...pendingSendState.current,
       message: decision.newMessage,
-      spokenMessage: pendingSend.wantsVoice ? decision.newMessage : null,
+      spokenMessage: pendingSendState.current.wantsVoice ? decision.newMessage : null,
     };
-    await replyInSelfChat(confirmPrompt(pendingSend));
+    await replyInSelfChat(confirmPrompt(pendingSendState.current));
   } else {
-    console.log(`[relay] send to ${pendingSend.label} cancelled`);
-    pendingSend = null;
+    console.log(`[relay] send to ${pendingSendState.current.label} cancelled`);
+    pendingSendState.current = null;
     await replyInSelfChat('Cancelled.');
   }
 }
@@ -112,7 +118,7 @@ export async function tryStartSendInstruction(body) {
     const raw = await resolveRawNumber(client, parsed.recipient);
     if (raw) {
       console.log(`[relay] resolved raw number: ${raw.label}, awaiting confirmation`);
-      pendingSend = {
+      pendingSendState.current = {
         type: 'confirm',
         contactId: raw.id,
         label: raw.label,
@@ -121,7 +127,7 @@ export async function tryStartSendInstruction(body) {
         spokenMessage: parsed.spokenMessage,
         voiceGender: parsed.voiceGender,
       };
-      await replyInSelfChat(confirmPrompt(pendingSend));
+      await replyInSelfChat(confirmPrompt(pendingSendState.current));
     } else {
       console.log(`[relay] no contact match for "${parsed.recipient}"`);
       await replyInSelfChat(`Couldn't find anyone matching "${parsed.recipient}" in your contacts.`);
@@ -129,7 +135,7 @@ export async function tryStartSendInstruction(body) {
   } else if (matches.length === 1) {
     const label = contactLabel(matches[0]);
     console.log(`[relay] single match: ${label}, awaiting confirmation`);
-    pendingSend = {
+    pendingSendState.current = {
       type: 'confirm',
       contactId: matches[0].id._serialized,
       label,
@@ -138,11 +144,11 @@ export async function tryStartSendInstruction(body) {
       spokenMessage: parsed.spokenMessage,
       voiceGender: parsed.voiceGender,
     };
-    await replyInSelfChat(confirmPrompt(pendingSend));
+    await replyInSelfChat(confirmPrompt(pendingSendState.current));
   } else {
     const candidates = matches.slice(0, 8).map((c) => ({ id: c.id._serialized, label: contactLabel(c) }));
     console.log('[relay] multiple matches, awaiting disambiguation:', candidates.map((c) => c.label));
-    pendingSend = {
+    pendingSendState.current = {
       type: 'disambiguate',
       candidates,
       message: parsed.message,

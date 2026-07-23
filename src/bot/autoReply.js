@@ -18,22 +18,18 @@ import {
   FORCE_SCRAPE_TOOL_CHOICE,
 } from '../tools/webSearch.js';
 import { formatIST } from '../tools/time.js';
+import { detectScript } from '../tools/scriptDetect.js';
 
 const { MessageMedia } = pkg;
 
-// A long Banglish/Hinglish-flavored history pulls the model's reply language back toward
-// that momentum even when the current message is plain English — a generic "match this
-// message's language" instruction in the persona alone isn't enough to fully break that
-// pull. Script is checkable with zero false positives (real Unicode ranges), so tag every
-// message with what script it's actually in and force a fresh per-turn judgment call —
-// no maintained word list guessing English vs. Banglish, that's left to the model, which
-// is fine at it once it's not defaulting to history.
-const BENGALI_SCRIPT = /[ঀ-৿]/;
-const DEVANAGARI_SCRIPT = /[ऀ-ॿ]/;
-
+// A long Banglish/Hinglish history pulls the model's reply language back toward that
+// momentum even when the current message is plain English, so tag every message with its
+// actual script to force a fresh per-turn judgment — no word list guessing English vs.
+// Banglish, that's left to the model, which is fine at it once not defaulting to history.
 function scriptTag(text) {
-  if (BENGALI_SCRIPT.test(text)) return '\n\n[Script check: this message is written in Bengali script.]';
-  if (DEVANAGARI_SCRIPT.test(text)) return '\n\n[Script check: this message is written in Devanagari/Hindi script.]';
+  const script = detectScript(text);
+  if (script === 'bn') return '\n\n[Script check: this message is written in Bengali script.]';
+  if (script === 'hi') return '\n\n[Script check: this message is written in Devanagari/Hindi script.]';
   return '\n\n[Script check: this message is in Latin script — judge from its actual words alone whether it is plain English or Banglish/Hinglish, regardless of what language earlier messages in this chat used.]';
 }
 

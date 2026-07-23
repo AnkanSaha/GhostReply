@@ -2,10 +2,17 @@ import { getMistralReply } from './mistral.js';
 import { getAIReply } from './openrouter.js';
 import { MAX_TOOL_ITERATIONS } from '../tools/config.js';
 
-// Tries Mistral's full model fallback chain first, then OpenRouter's, before giving up.
-// Shared by every caller (auto-reply, relay extraction, takeover duration parsing) so the
-// same two-provider reliability applies everywhere, not just the main conversation flow.
-// Throws only if both providers are exhausted.
+// Every classification-style caller (relay, scheduler, takeover) logs which model answered
+// and what it said right after calling getReply — one shared line pair instead of each
+// caller repeating it.
+export function logModelUsage(tag, model, raw, label = 'raw response') {
+  console.log(`[${tag}] model used:`, model);
+  console.log(`[${tag}] ${label}:`, raw);
+}
+
+// Tries Mistral's full model fallback chain first, then OpenRouter's — shared by every
+// caller so the same two-provider reliability applies everywhere. Throws only if both
+// providers are exhausted.
 async function getReplyOnce(messages, tools, toolChoice) {
   try {
     return await getMistralReply(messages, { tools, toolChoice });
@@ -20,17 +27,10 @@ async function getReplyOnce(messages, tools, toolChoice) {
   }
 }
 
-// Callers that don't pass `tools`/`executeTool` get the exact same behavior as before —
-// the loop below always returns on its first iteration in that case, since a request with
-// no `tools` never gets a `tool_calls` response back. Only a caller that opts in (currently
-// just auto-reply's persona conversation) pays for the extra round-trips a tool call costs.
-//
-// `toolChoice` (e.g. { type: 'function', function: { name: 'web_search' } }) forces that
-// specific tool to be called on the FIRST turn only — a system-prompt instruction like "use
-// web_search for X" is a request the model can and does ignore, so this is for callers that
-// need an actual guarantee (e.g. the user explicitly said "search for this"). It's dropped
-// after the first turn so the model can freely give its final answer once the tool result
-// is in, instead of being forced to call the same tool forever.
+// A caller without `tools` always returns on the first iteration (no `tool_calls` possible),
+// so only opted-in callers pay for extra round-trips. `toolChoice` forces one specific tool
+// on the FIRST turn only, for callers needing a guarantee beyond a system-prompt request the
+// model could ignore — dropped after that so the model can give its final answer freely.
 export async function getReply(messages, { tools, executeTool, toolChoice } = {}) {
   let conversation = messages;
 

@@ -1,12 +1,9 @@
 import { WEB_SEARCH_RESULT_COUNT, SCRAPE_MAX_CHARS, SCRAPE_TIMEOUT_MS } from './config.js';
 
-// No API key, no signup, no credit card — a plain GET against DuckDuckGo's server-rendered
-// HTML results page (no JS needed to read it, unlike the main site). This is scraping, not
-// an official API: DuckDuckGo doesn't sanction it and the markup can change without notice.
-// Bing and Google were tried too and dropped: Bing serves a CAPTCHA to a plain HTTP client,
-// and Google no longer server-renders results at all for non-JS requests (empty shell page,
-// needs a full browser) — neither can work via a simple fetch, so "falling back" to them
-// would just be dead code pretending to add redundancy it doesn't have.
+// Key-free plain GET against DuckDuckGo's server-rendered HTML results page — unsanctioned
+// scraping, not an official API, so the markup can change without notice. Bing/Google were
+// tried and dropped: Bing CAPTCHAs plain HTTP clients, Google no longer server-renders for
+// non-JS requests, so neither works via a simple fetch.
 // ponytail: HTML-scraped search, same risk class as this project's own WhatsApp automation —
 // swap for an official API (Brave, etc.) if this starts breaking or reliability matters more
 // than staying key-free.
@@ -92,11 +89,9 @@ async function scrapeUrl(url) {
   }
 }
 
-// A system-prompt rule ("use web_search for X") is only a request — the model can and does
-// ignore it, especially when it feels confident it already knows the answer (that's exactly
-// how the CJP/CJI mixup happened). When the user explicitly asks to search, force it instead
-// of hoping the model complies: detects the request (English/Banglish/Hinglish loanword
-// "search"/"google"/"look up", plus Bengali/Hindi script) and pairs with FORCE_WEB_SEARCH_TOOL_CHOICE.
+// A system-prompt rule ("use web_search for X") is only a request the model can and does
+// ignore when it's overconfident (see: the CJP/CJI mixup) — when the user explicitly asks
+// to search, force it instead via FORCE_WEB_SEARCH_TOOL_CHOICE.
 const EXPLICIT_SEARCH_REGEX = /\b(?:search|google|look\s*(?:it\s*)?up)\b|খুঁজ|সার্চ|खोज|ढूंढ|पता\s*कर/i;
 
 export function wantsForcedSearch(body) {

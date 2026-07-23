@@ -1,10 +1,10 @@
-import { getReply } from '../models/getReply.js';
+import { getReply, logModelUsage } from '../models/getReply.js';
+import { stripCodeFence } from '../models/parseModelJson.js';
 import { SEND_EXTRACT_PROMPT, SEND_CONFIRM_PROMPT, MIN_CONTACT_NUMBER_DIGITS, MIN_RAW_NUMBER_DIGITS } from './config.js';
 
 function parseJsonReply(raw) {
   try {
-    const cleaned = raw.trim().replace(/^```(?:json)?\n?/, '').replace(/```$/, '');
-    const parsed = JSON.parse(cleaned);
+    const parsed = JSON.parse(stripCodeFence(raw));
     if (parsed?.recipient && parsed?.message) {
       return {
         recipient: parsed.recipient,
@@ -25,15 +25,13 @@ export async function extractSendInstruction(text) {
     { role: 'system', content: SEND_EXTRACT_PROMPT },
     { role: 'user', content: `Instruction: "${text}"` },
   ]);
-  console.log('[relay] model used:', model);
-  console.log('[relay] raw response:', raw);
+  logModelUsage('relay', model, raw);
   return parseJsonReply(raw);
 }
 
 function parseConfirmationJson(raw) {
   try {
-    const cleaned = raw.trim().replace(/^```(?:json)?\n?/, '').replace(/```$/, '');
-    const parsed = JSON.parse(cleaned);
+    const parsed = JSON.parse(stripCodeFence(raw));
     if (['confirm', 'cancel', 'replace'].includes(parsed?.action)) return parsed;
   } catch {
     // malformed JSON — fall back to treating it as a cancel, safer than guessing send
@@ -57,8 +55,7 @@ export async function interpretConfirmationReply(draftMessage, replyText) {
     { role: 'system', content: SEND_CONFIRM_PROMPT },
     { role: 'user', content: `Draft: "${draftMessage}"\nReply: "${replyText}"` },
   ]);
-  console.log('[relay] model used:', model);
-  console.log('[relay] raw response:', raw);
+  logModelUsage('relay', model, raw);
   return parseConfirmationJson(raw);
 }
 

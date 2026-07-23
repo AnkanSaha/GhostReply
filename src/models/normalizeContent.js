@@ -1,8 +1,6 @@
-// Most providers return message.content as a plain string, but some responses (seen from
-// Mistral's medium model after a tool-augmented turn) return an array of content blocks
-// instead — { type: 'text', text: '...' } interleaved with { type: 'reference', ... }
-// citation markers. Downstream code (VOICE: line parsing, etc.) needs a plain string
-// either way, so both providers normalize through this before returning `text`.
+// Usually message.content is a plain string, but Mistral's medium model after a
+// tool-augmented turn returns an array of { type: 'text' }/{ type: 'reference' } blocks
+// instead — flatten either shape to the plain string downstream code expects.
 export function normalizeContent(content) {
   if (content == null || typeof content === 'string') return content;
   if (Array.isArray(content)) {

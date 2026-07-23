@@ -133,8 +133,13 @@ thinly across unrelated files just to keep files short.
 
 ### 8. Comments: short, few, and only where the code can't speak for itself
 
-Default to no comment. When one is needed, one line explaining *why*
-(a non-obvious constraint, a workaround, a subtlety), never *what* the
-next line does. Reserve JSDoc blocks for genuinely non-obvious public
-function contracts (unusual parameter shapes, non-throwing error
-conventions) — not as a default header on every function.
+Default to no comment. When the *why* isn't obvious from reading the code
+(a hidden constraint, a workaround, a race condition, a subtle tradeoff),
+write it — one line for a simple reason, up to about four lines when the
+constraint genuinely needs that much context (e.g. an upstream bug, an
+ordering requirement). Never restate *what* the next line does, and never
+let it run into a multi-paragraph essay — if trimming it changes the
+meaning, the code likely needs a clearer name instead of a longer comment.
+Reserve JSDoc blocks for genuinely non-obvious public function contracts
+(unusual parameter shapes, non-throwing error conventions) — not as a
+default header on every function.

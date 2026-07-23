@@ -2,11 +2,12 @@ import { spawn } from 'node:child_process';
 import { buffer as streamToBuffer } from 'node:stream/consumers';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { TTS_VOICES } from './config.js';
+import { detectScript } from './scriptDetect.js';
 
+// Latin script covers both English and romanized Banglish/Hinglish — no dedicated voice for those.
 function detectLang(text) {
-  if (/[ঀ-৿]/.test(text)) return 'bn'; // Bengali script
-  if (/[ऀ-ॿ]/.test(text)) return 'hi'; // Devanagari script
-  return 'en'; // Latin script — covers English and romanized Banglish/Hinglish (no dedicated voice for those)
+  const script = detectScript(text);
+  return script === 'latin' ? 'en' : script;
 }
 
 // The library builds an SSML request from this text without escaping it (per its

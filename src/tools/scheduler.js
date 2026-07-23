@@ -1,10 +1,10 @@
-import { getReply } from '../models/getReply.js';
+import { getReply, logModelUsage } from '../models/getReply.js';
+import { stripCodeFence } from '../models/parseModelJson.js';
 import { SCHEDULE_EXTRACT_PROMPT, scheduledMessagePrompt } from './config.js';
 
 function parseScheduleJson(raw) {
   try {
-    const cleaned = raw.trim().replace(/^```(?:json)?\n?/, '').replace(/```$/, '');
-    const parsed = JSON.parse(cleaned);
+    const parsed = JSON.parse(stripCodeFence(raw));
 
     if (parsed?.action === 'create' && Array.isArray(parsed.recipients) && parsed.recipients.length && Array.isArray(parsed.entries) && parsed.entries.length) {
       return {
@@ -40,8 +40,7 @@ export async function extractScheduleInstruction(text) {
     { role: 'system', content: SCHEDULE_EXTRACT_PROMPT },
     { role: 'user', content: `Instruction: "${text}"` },
   ]);
-  console.log('[scheduler] model used:', model);
-  console.log('[scheduler] raw response:', raw);
+  logModelUsage('scheduler', model, raw);
   return parseScheduleJson(raw);
 }
 
@@ -52,7 +51,6 @@ export async function generateScheduledMessage(topic) {
     { role: 'system', content: scheduledMessagePrompt(topic) },
     { role: 'user', content: `Occasion: ${topic}` },
   ]);
-  console.log('[scheduler] model used:', model);
-  console.log('[scheduler] generated message:', text);
+  logModelUsage('scheduler', model, text, 'generated message');
   return text.trim();
 }

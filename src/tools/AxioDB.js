@@ -1,75 +1,107 @@
 import {AxioDB} from 'axiodb';
 import { HISTORY_LIMIT, IST_OFFSET_MS } from './config.js';
 
-let personalChat;
-let groupChats;
-let schedules;
-
-// Call once at startup before saveMessage/getRecentMessages are used.
-// Local/native instance only — no GUI, no TCP, no cloud. Stores under ./AxioDB in the project root.
-export const initChatHistory = async () => {
-  const Instance = new AxioDB({ GUI: false });
-  const ChatHistoryDB = await Instance.createDB('ChatHistory');
-  personalChat = await ChatHistoryDB.createCollection('personalChat');
-  groupChats = await ChatHistoryDB.createCollection('groupChats');
-  schedules = await ChatHistoryDB.createCollection('schedules');
-
-  await personalChat.newIndex('userId');
-  await groupChats.newIndex('userId');
-};
-
 function nowIST() {
   return new Date(Date.now() + IST_OFFSET_MS).toISOString().replace('Z', '+05:30');
 }
 
-function collectionFor(chatId) {
-  return chatId.endsWith('@g.us') ? groupChats : personalChat;
+// Owns the AxioDB collection handles and every read/write against them — local/native
+// instance only (no GUI, no TCP, no cloud), stored under ./AxioDB in the project root.
+class ChatHistoryStore {
+  constructor() {
+    this.personalChat = null;
+    this.groupChats = null;
+    this.schedules = null;
+  }
+
+  // Call once at startup before any other method is used.
+  async init() {
+    const instance = new AxioDB({ GUI: false, TCP: false, cloud: false, RootName: "Context" });
+    const chatHistoryDB = await instance.createDB('ChatHistory');
+    this.personalChat = await chatHistoryDB.createCollection('personalChat');
+    this.groupChats = await chatHistoryDB.createCollection('groupChats');
+    this.schedules = await chatHistoryDB.createCollection('schedules');
+
+    await this.personalChat.newIndex('userId');
+    await this.groupChats.newIndex('userId');
+  }
+
+  collectionFor(chatId) {
+    return chatId.endsWith('@g.us') ? this.groupChats : this.personalChat;
+  }
+
+  async saveMessage(chatId, userMessage, reply, model) {
+    await this.collectionFor(chatId).insert({
+      userId: chatId,
+      userMessage,
+      reply,
+      model,
+      timestamp: nowIST(),
+    });
+  }
+
+  // Last `limit` messages for this chat, oldest first.
+  async getRecentMessages(chatId, limit) {
+    const result = await this.collectionFor(chatId)
+      .query({ userId: chatId })
+      .Limit(limit)
+      .Skip(0)
+      .Sort({ timestamp: -1 })
+      .exec();
+
+    const documents = result.data?.documents ?? [];
+    return documents.reverse();
+  }
+
+  // One document per (time, topic, recipient) — a daily-recurring or one-time message
+  // schedule. verbatim: true means `topic` IS the literal message to send every time,
+  // unmodified; false means `topic` is just an occasion/theme and a fresh message is
+  // generated at fire-time.
+  async saveSchedule({ time, topic, recipientId, recipientLabel, recurring, verbatim }) {
+    await this.schedules.insert({
+      time,
+      topic,
+      recipientId,
+      recipientLabel,
+      recurring,
+      verbatim,
+      createdAt: nowIST(),
+    });
+  }
+
+  async getAllSchedules() {
+    const result = await this.schedules.query({}).exec();
+    return result.data?.documents ?? [];
+  }
+
+  // One-time schedules are removed after they fire; recurring ones stay.
+  async deleteSchedule(documentId) {
+    await this.schedules.delete({ documentId }).deleteOne();
+  }
+}
+
+const chatHistoryStore = new ChatHistoryStore();
+
+export async function initChatHistory() {
+  return chatHistoryStore.init();
 }
 
 export async function saveMessage(chatId, userMessage, reply, model) {
-  await collectionFor(chatId).insert({
-    userId: chatId,
-    userMessage,
-    reply,
-    model,
-    timestamp: nowIST(),
-  });
+  return chatHistoryStore.saveMessage(chatId, userMessage, reply, model);
 }
 
-// Last `limit` messages for this chat, oldest first.
 export async function getRecentMessages(chatId, limit = HISTORY_LIMIT) {
-  const result = await collectionFor(chatId)
-    .query({ userId: chatId })
-    .Limit(limit)
-    .Skip(0)
-    .Sort({ timestamp: -1 })
-    .exec();
-
-  const documents = result.data?.documents ?? [];
-  return documents.reverse();
+  return chatHistoryStore.getRecentMessages(chatId, limit);
 }
 
-// One document per (time, topic, recipient) — a daily-recurring or one-time message schedule.
-// verbatim: true means `topic` IS the literal message to send every time, unmodified;
-// false means `topic` is just an occasion/theme and a fresh message is generated at fire-time.
-export async function saveSchedule({ time, topic, recipientId, recipientLabel, recurring, verbatim }) {
-  await schedules.insert({
-    time,
-    topic,
-    recipientId,
-    recipientLabel,
-    recurring,
-    verbatim,
-    createdAt: nowIST(),
-  });
+export async function saveSchedule(schedule) {
+  return chatHistoryStore.saveSchedule(schedule);
 }
 
 export async function getAllSchedules() {
-  const result = await schedules.query({}).exec();
-  return result.data?.documents ?? [];
+  return chatHistoryStore.getAllSchedules();
 }
 
-// One-time schedules are removed after they fire; recurring ones stay.
 export async function deleteSchedule(documentId) {
-  await schedules.delete({ documentId }).deleteOne();
+  return chatHistoryStore.deleteSchedule(documentId);
 }

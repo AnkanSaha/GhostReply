@@ -6,17 +6,32 @@ import { CANCEL_REGEX } from './relayHandler.js';
 import { saveSchedule, getAllSchedules, deleteSchedule } from '../tools/AxioDB.js';
 import { SCHEDULE_CHECK_INTERVAL_MS, IST_OFFSET_MS } from '../tools/config.js';
 
-// documentId -> "YYYY-MM-DD" it last fired on, so a schedule doesn't fire twice within
-// the same day if the minute-check overlaps. In-memory only: a restart within the exact
-// firing minute could in theory refire once — an accepted, low-stakes edge case.
-const firedToday = new Map();
+// Owns the two pieces of in-memory scheduling state: which schedules already fired today
+// (so the minute-check can't double-fire one), and any in-progress recipient disambiguation.
+// In-memory only: a restart within the exact firing minute could in theory refire a schedule
+// once — an accepted, low-stakes edge case.
+class ScheduleRuntime {
+  constructor() {
+    this.firedToday = new Map(); // documentId -> "YYYY-MM-DD" it last fired on
+    // Pending recipient disambiguation for an in-progress schedule-setup — only one at a
+    // time. { candidates, queue } where queue is the resolution state from resolveRecipients,
+    // or null.
+    this.pendingSchedule = null;
+  }
 
-// Pending recipient disambiguation for an in-progress schedule-setup — only one at a time.
-// { candidates, queue } where queue is the resolution state from resolveRecipients below.
-let pendingSchedule = null;
+  hasFiredToday(documentId, dateKey) {
+    return this.firedToday.get(documentId) === dateKey;
+  }
+
+  markFired(documentId, dateKey) {
+    this.firedToday.set(documentId, dateKey);
+  }
+}
+
+const scheduleRuntime = new ScheduleRuntime();
 
 export function hasPendingSchedule() {
-  return pendingSchedule !== null;
+  return scheduleRuntime.pendingSchedule !== null;
 }
 
 function nowIST() {
@@ -70,8 +85,8 @@ async function checkSchedules() {
 
   for (const schedule of allSchedules) {
     if (schedule.time !== hhmm) continue;
-    if (firedToday.get(schedule.documentId) === dateKey) continue;
-    firedToday.set(schedule.documentId, dateKey);
+    if (scheduleRuntime.hasFiredToday(schedule.documentId, dateKey)) continue;
+    scheduleRuntime.markFired(schedule.documentId, dateKey);
     await fireSchedule(schedule);
   }
 }
@@ -184,7 +199,7 @@ async function resolveRecipients(queue) {
     } else {
       const candidates = matches.slice(0, 8).map((c) => ({ id: c.id._serialized, label: contactLabel(c) }));
       console.log(`[scheduler] multiple matches for "${name}", awaiting disambiguation:`, candidates.map((c) => c.label));
-      pendingSchedule = { candidates, queue };
+      scheduleRuntime.pendingSchedule = { candidates, queue };
       const list = candidates.map((c, i) => `${i + 1}. ${c.label}`).join('\n');
       await replyInSelfChat(`Multiple matches for "${name}":\n${list}\nReply with a number, or "cancel".`);
       return false;
@@ -195,11 +210,11 @@ async function resolveRecipients(queue) {
 
 export async function handlePendingSchedule(body) {
   const normalized = body.trim();
-  const { candidates, queue } = pendingSchedule;
+  const { candidates, queue } = scheduleRuntime.pendingSchedule;
 
   if (CANCEL_REGEX.test(normalized)) {
     console.log('[scheduler] schedule setup cancelled during disambiguation');
-    pendingSchedule = null;
+    scheduleRuntime.pendingSchedule = null;
     await replyInSelfChat('Cancelled.');
     return;
   }
@@ -213,7 +228,7 @@ export async function handlePendingSchedule(body) {
 
   console.log(`[scheduler] disambiguation resolved to ${candidate.label}`);
   queue.resolved.push(candidate);
-  pendingSchedule = null;
+  scheduleRuntime.pendingSchedule = null;
 
   const done = await resolveRecipients(queue);
   if (done) await saveResolvedSchedules(queue);
