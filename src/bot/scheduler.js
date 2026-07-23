@@ -3,28 +3,16 @@ import { replyInSelfChat } from './selfChat.js';
 import { extractScheduleInstruction, generateScheduledMessage } from '../tools/scheduler.js';
 import { findMatchingContacts, contactLabel } from '../tools/relay.js';
 import { CANCEL_REGEX } from './relayHandler.js';
-import { saveSchedule, getAllSchedules, deleteSchedule } from '../tools/AxioDB.js';
+import { saveSchedule, getAllSchedules, getSchedulesDueAt, markScheduleFired, deleteSchedule } from '../tools/AxioDB.js';
 import { SCHEDULE_CHECK_INTERVAL_MS, IST_OFFSET_MS } from '../tools/config.js';
 
-// Owns the two pieces of in-memory scheduling state: which schedules already fired today
-// (so the minute-check can't double-fire one), and any in-progress recipient disambiguation.
-// In-memory only: a restart within the exact firing minute could in theory refire a schedule
-// once — an accepted, low-stakes edge case.
+// Owns any in-progress recipient disambiguation for a schedule being set up — only one at
+// a time. pendingSchedule: null, or { candidates, queue } where queue is the resolution
+// state from resolveRecipients. (Which schedules already fired today lives on each
+// schedule's own `lastFiredDate` field in AxioDB, not here — see checkSchedules below.)
 class ScheduleRuntime {
   constructor() {
-    this.firedToday = new Map(); // documentId -> "YYYY-MM-DD" it last fired on
-    // Pending recipient disambiguation for an in-progress schedule-setup — only one at a
-    // time. { candidates, queue } where queue is the resolution state from resolveRecipients,
-    // or null.
     this.pendingSchedule = null;
-  }
-
-  hasFiredToday(documentId, dateKey) {
-    return this.firedToday.get(documentId) === dateKey;
-  }
-
-  markFired(documentId, dateKey) {
-    this.firedToday.set(documentId, dateKey);
   }
 }
 
@@ -71,22 +59,28 @@ async function fireSchedule(schedule) {
 }
 
 async function checkSchedules() {
-  let allSchedules;
-  try {
-    allSchedules = await getAllSchedules();
-  } catch (err) {
-    console.warn('[scheduler] failed to load schedules:', err.message);
-    return;
-  }
-
   const now = nowIST();
   const hhmm = currentHHMM(now);
   const dateKey = currentDateKeyIST(now);
 
-  for (const schedule of allSchedules) {
-    if (schedule.time !== hhmm) continue;
-    if (scheduleRuntime.hasFiredToday(schedule.documentId, dateKey)) continue;
-    scheduleRuntime.markFired(schedule.documentId, dateKey);
+  let dueSchedules;
+  try {
+    dueSchedules = await getSchedulesDueAt(hhmm);
+  } catch (err) {
+    console.warn('[scheduler] failed to load due schedules:', err.message);
+    return;
+  }
+
+  for (const schedule of dueSchedules) {
+    if (schedule.lastFiredDate === dateKey) continue;
+    try {
+      await markScheduleFired(schedule.documentId, dateKey);
+    } catch (err) {
+      // Couldn't persist the fired-mark — skip firing this tick rather than risk a
+      // duplicate send with no record of having already tried.
+      console.warn(`[scheduler] failed to record fired state for ${schedule.recipientLabel}:`, err.message);
+      continue;
+    }
     await fireSchedule(schedule);
   }
 }

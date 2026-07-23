@@ -24,6 +24,7 @@ class ChatHistoryStore {
 
     await this.personalChat.newIndex('userId');
     await this.groupChats.newIndex('userId');
+    await this.schedules.newIndex('time');
   }
 
   collectionFor(chatId) {
@@ -56,7 +57,9 @@ class ChatHistoryStore {
   // One document per (time, topic, recipient) — a daily-recurring or one-time message
   // schedule. verbatim: true means `topic` IS the literal message to send every time,
   // unmodified; false means `topic` is just an occasion/theme and a fresh message is
-  // generated at fire-time.
+  // generated at fire-time. lastFiredDate ("YYYY-MM-DD" or null) tracks the scheduler's
+  // own fired-today check — persisted here rather than kept in memory, so it survives a
+  // restart and never orphans once its schedule is deleted.
   async saveSchedule({ time, topic, recipientId, recipientLabel, recurring, verbatim }) {
     await this.schedules.insert({
       time,
@@ -65,6 +68,7 @@ class ChatHistoryStore {
       recipientLabel,
       recurring,
       verbatim,
+      lastFiredDate: null,
       createdAt: nowIST(),
     });
   }
@@ -72,6 +76,18 @@ class ChatHistoryStore {
   async getAllSchedules() {
     const result = await this.schedules.query({}).exec();
     return result.data?.documents ?? [];
+  }
+
+  // Only schedules due at this exact "HH:MM", instead of loading every schedule and
+  // filtering in JS — the minute-check runs 1,440 times a day, so pushing the match down
+  // to the query keeps that cost proportional to what's actually due, not the total count.
+  async getSchedulesDueAt(time) {
+    const result = await this.schedules.query({ time }).exec();
+    return result.data?.documents ?? [];
+  }
+
+  async markScheduleFired(documentId, dateKey) {
+    await this.schedules.update({ documentId }).UpdateOne({ lastFiredDate: dateKey });
   }
 
   // One-time schedules are removed after they fire; recurring ones stay.
@@ -100,6 +116,14 @@ export async function saveSchedule(schedule) {
 
 export async function getAllSchedules() {
   return chatHistoryStore.getAllSchedules();
+}
+
+export async function getSchedulesDueAt(time) {
+  return chatHistoryStore.getSchedulesDueAt(time);
+}
+
+export async function markScheduleFired(documentId, dateKey) {
+  return chatHistoryStore.markScheduleFired(documentId, dateKey);
 }
 
 export async function deleteSchedule(documentId) {
