@@ -4,6 +4,7 @@ import { getSelfChatId, isSendingToSelfChat, resolveSelfChatLazily } from './sel
 import { tryHandleTakeoverCommand } from './takeover.js';
 import { hasPendingSend, handlePendingSend, tryStartSendInstruction } from './relayHandler.js';
 import { hasPendingSchedule, handlePendingSchedule, tryStartScheduleInstruction } from './scheduler.js';
+import { isStaleMessage } from './startupGuard.js';
 
 // 'message' never fires for fromMe messages (wwebjs filters those out before emitting it),
 // so these commands can only be caught here. message_create fires for every message either way.
@@ -14,6 +15,7 @@ export function registerSelfChatHandler() {
     if (!msg.fromMe) return;
     if (isSendingToSelfChat(msg.to)) return; // our own outgoing prompt, not a manual command
     if (wasSentByBot(msg.id._serialized)) return; // our own auto-reply, not a manual command
+    if (isStaleMessage(msg)) return; // a command typed before this session started, replayed on reconnect
 
     if (msg.to !== getSelfChatId()) {
       const isSelfChat = await resolveSelfChatLazily(msg.to);

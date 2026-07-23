@@ -19,6 +19,7 @@ import {
 } from '../tools/webSearch.js';
 import { formatIST } from '../tools/time.js';
 import { detectScript } from '../tools/scriptDetect.js';
+import { isStaleMessage } from './startupGuard.js';
 
 const { MessageMedia } = pkg;
 
@@ -39,6 +40,10 @@ export function registerAutoReplyHandler() {
       if (msg.from === 'status@broadcast' || msg.fromMe) return;
       if (msg.from.endsWith('@newsletter')) return; // WhatsApp Channels — one-way broadcasts, not a conversation
       if (!msg.body || !msg.body.trim()) return; // reactions, revokes, etc. fire 'message' with no text
+      if (isStaleMessage(msg)) {
+        console.log(`[autoReply] skipping stale message from ${msg.from} (sent before this session started)`);
+        return;
+      }
 
       const chatId = msg.from;
 
