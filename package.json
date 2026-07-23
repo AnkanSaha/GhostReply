@@ -13,7 +13,7 @@
     "test": "node tests/openrouter.test.js"
   },
   "dependencies": {
-    "axiodb": "^12.10.26",
+    "axiodb": "^12.11.27",
     "dotenv": "^16.4.5",
     "msedge-tts": "^2.0.7",
     "qrcode-terminal": "^0.12.0",

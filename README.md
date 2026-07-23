@@ -23,7 +23,7 @@ A self-hosted WhatsApp agent that replies to your contacts as you — matching y
 ## Prerequisites
 
 - Node.js ≥ 20
-- **Google Chrome** installed at `/usr/bin/google-chrome-stable` (Linux) — the Puppeteer path is hardcoded in `src/bot/client.js`; adjust that path if your Chrome install lives elsewhere or you're on a different OS.
+- No separate Chrome install needed — `npm install` downloads Puppeteer's own compatible Chrome build.
 - **ffmpeg** available on your system `PATH` — used to transcode TTS output into the OGG/Opus format WhatsApp's voice-note player requires.
 - A free [OpenRouter](https://openrouter.ai/) API key (required).
 - A free [Mistral](https://console.mistral.ai/) API key (optional, but recommended — Mistral's models are tried first).

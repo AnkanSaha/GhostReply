@@ -9,7 +9,8 @@ if (!process.env.OPENROUTER_API_KEY) {
 
 export const client = new Client({
   authStrategy: new LocalAuth(),
-  puppeteer: { executablePath: '/usr/bin/google-chrome-stable' },
+  // No hardcoded executablePath — Puppeteer resolves its own npm-installed Chrome.
+  puppeteer: { args: ['--no-sandbox', '--disable-setuid-sandbox'] },
   // ponytail: no version pin. WhatsApp ships new web-client builds multiple times a day, and
   // one recent build broke several internal whatsapp-web.js calls (getContact, fetchMessages,
   // getChatById) with a cryptic "r: r" Puppeteer error — a known, currently-open upstream
