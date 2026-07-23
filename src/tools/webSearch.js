@@ -103,9 +103,20 @@ export function wantsForcedSearch(body) {
   return EXPLICIT_SEARCH_REGEX.test(body);
 }
 
-// Forces the model to call web_search specifically (not just "any tool") on the first
-// turn — same named-tool-choice object shape works unchanged on both Mistral and OpenRouter.
+// The persona unconditionally says "use scrape_url whenever they send a link" — no keyword
+// needed. Relying on the model to recognize scrape-intent wording (e.g. "scrap this site")
+// left it free to instead decline as if it were a coding task; a link in the message is
+// itself the trigger, so force the tool the same way an explicit search request is forced.
+const URL_REGEX = /https?:\/\/\S+/i;
+
+export function containsUrl(body) {
+  return URL_REGEX.test(body);
+}
+
+// Forces the model to call web_search/scrape_url specifically (not just "any tool") on the
+// first turn — same named-tool-choice object shape works unchanged on both Mistral and OpenRouter.
 export const FORCE_WEB_SEARCH_TOOL_CHOICE = { type: 'function', function: { name: 'web_search' } };
+export const FORCE_SCRAPE_TOOL_CHOICE = { type: 'function', function: { name: 'scrape_url' } };
 
 export const WEB_TOOLS = [
   {

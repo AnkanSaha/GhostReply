@@ -9,10 +9,33 @@ import { sendAsBot } from './botMessages.js';
 import { isAutoReplyPaused, getPausedUntil } from './takeover.js';
 import { parseReply, humanDelayMs } from './voiceReply.js';
 import { getVoiceGender, applyVoiceGenderCommand } from './voicePreference.js';
-import { WEB_TOOLS, executeToolCall, wantsForcedSearch, FORCE_WEB_SEARCH_TOOL_CHOICE } from '../tools/webSearch.js';
+import {
+  WEB_TOOLS,
+  executeToolCall,
+  wantsForcedSearch,
+  containsUrl,
+  FORCE_WEB_SEARCH_TOOL_CHOICE,
+  FORCE_SCRAPE_TOOL_CHOICE,
+} from '../tools/webSearch.js';
 import { formatIST } from '../tools/time.js';
 
 const { MessageMedia } = pkg;
+
+// A long Banglish/Hinglish-flavored history pulls the model's reply language back toward
+// that momentum even when the current message is plain English — a generic "match this
+// message's language" instruction in the persona alone isn't enough to fully break that
+// pull. Script is checkable with zero false positives (real Unicode ranges), so tag every
+// message with what script it's actually in and force a fresh per-turn judgment call —
+// no maintained word list guessing English vs. Banglish, that's left to the model, which
+// is fine at it once it's not defaulting to history.
+const BENGALI_SCRIPT = /[ঀ-৿]/;
+const DEVANAGARI_SCRIPT = /[ऀ-ॿ]/;
+
+function scriptTag(text) {
+  if (BENGALI_SCRIPT.test(text)) return '\n\n[Script check: this message is written in Bengali script.]';
+  if (DEVANAGARI_SCRIPT.test(text)) return '\n\n[Script check: this message is written in Devanagari/Hindi script.]';
+  return '\n\n[Script check: this message is in Latin script — judge from its actual words alone whether it is plain English or Banglish/Hinglish, regardless of what language earlier messages in this chat used.]';
+}
 
 export function registerAutoReplyHandler() {
   client.on('message', async (msg) => {
@@ -85,12 +108,18 @@ export function registerAutoReplyHandler() {
       const promptMessages = [
         { role: 'system', content: PERSONA },
         ...historyMessages,
-        { role: 'user', content: msg.body },
+        { role: 'user', content: `${msg.body}${scriptTag(msg.body)}` },
       ];
       console.log('[prompt]', { chatId: realNumber, messages: promptMessages });
 
-      const toolChoice = wantsForcedSearch(msg.body) ? FORCE_WEB_SEARCH_TOOL_CHOICE : undefined;
-      if (toolChoice) console.log(`[tool] forcing web_search — "${msg.body}" explicitly asked for a search`);
+      let toolChoice;
+      if (containsUrl(msg.body)) {
+        toolChoice = FORCE_SCRAPE_TOOL_CHOICE;
+        console.log(`[tool] forcing scrape_url — "${msg.body}" contains a link`);
+      } else if (wantsForcedSearch(msg.body)) {
+        toolChoice = FORCE_WEB_SEARCH_TOOL_CHOICE;
+        console.log(`[tool] forcing web_search — "${msg.body}" explicitly asked for a search`);
+      }
 
       let text, model;
       try {
