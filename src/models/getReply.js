@@ -35,7 +35,12 @@ async function getReplyOnce(messages, tools, toolChoice, signal) {
 // so only opted-in callers pay for extra round-trips. `toolChoice` forces one specific tool
 // on the FIRST turn only, for callers needing a guarantee beyond a system-prompt request the
 // model could ignore — dropped after that so the model can give its final answer freely.
-export async function getReply(messages, { tools, executeTool, toolChoice } = {}) {
+//
+// `terminalTools` (a Set of tool names) marks tools whose call IS the final answer — e.g.
+// send_voice_reply — as opposed to an informational tool like web_search whose result gets
+// executed and fed back for one more completion. A terminal call is returned directly as
+// `toolCall` instead of being run through `executeTool`.
+export async function getReply(messages, { tools, executeTool, toolChoice, terminalTools } = {}) {
   const controller = createTrackedAbortController();
   try {
     let conversation = messages;
@@ -45,6 +50,9 @@ export async function getReply(messages, { tools, executeTool, toolChoice } = {}
 
       const { text, model, toolCalls } = await getReplyOnce(conversation, tools, i === 0 ? toolChoice : undefined, controller.signal);
       if (!toolCalls?.length) return { text, model };
+
+      const terminalCall = terminalTools && toolCalls.find((call) => terminalTools.has(call.function.name));
+      if (terminalCall) return { text, model, toolCall: terminalCall };
 
       if (!executeTool) throw new Error('model requested a tool call but no executeTool was provided');
 

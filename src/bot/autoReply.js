@@ -7,7 +7,7 @@ import { textToSpeech } from '../tools/tts.js';
 import { sleep } from '../tools/rateLimiter.js';
 import { sendAsBot } from './botMessages.js';
 import { isAutoReplyPaused, getPausedUntil } from './takeover.js';
-import { parseReply, humanDelayMs } from './voiceReply.js';
+import { humanDelayMs, VOICE_REPLY_TOOL } from './voiceReply.js';
 import { getVoiceGender, applyVoiceGenderCommand } from './voicePreference.js';
 import {
   WEB_TOOLS,
@@ -22,6 +22,9 @@ import { detectScript } from '../tools/scriptDetect.js';
 import { isStaleMessage } from './startupGuard.js';
 
 const { MessageMedia } = pkg;
+
+const AUTO_REPLY_TOOLS = [...WEB_TOOLS, VOICE_REPLY_TOOL];
+const TERMINAL_TOOLS = new Set([VOICE_REPLY_TOOL.function.name]);
 
 // A long Banglish/Hinglish history pulls the model's reply language back toward that
 // momentum even when the current message is plain English, so tag every message with its
@@ -122,9 +125,14 @@ export function registerAutoReplyHandler() {
         console.log(`[tool] forcing web_search — "${msg.body}" explicitly asked for a search`);
       }
 
-      let text, model;
+      let text, model, toolCall;
       try {
-        ({ text, model } = await getReply(promptMessages, { tools: WEB_TOOLS, executeTool: executeToolCall, toolChoice }));
+        ({ text, model, toolCall } = await getReply(promptMessages, {
+          tools: AUTO_REPLY_TOOLS,
+          executeTool: executeToolCall,
+          toolChoice,
+          terminalTools: TERMINAL_TOOLS,
+        }));
       } catch {
         // getReply() already logged which provider(s) failed and why.
         await sendAsBot(msg.reply("Sorry, I couldn't process that right now — please try again shortly."));
@@ -132,9 +140,20 @@ export function registerAutoReplyHandler() {
       }
 
       console.log('[model]', { chatId: realNumber, model });
-      console.log('[raw]', { chatId: realNumber, text });
 
-      const { wantsVoice, replyText, spokenText } = parseReply(text);
+      let wantsVoice, replyText, spokenText;
+      if (toolCall) {
+        const args = JSON.parse(toolCall.function.arguments);
+        wantsVoice = true;
+        replyText = args.text;
+        spokenText = args.spokenText || args.text;
+        console.log('[raw]', { chatId: realNumber, toolCall: args });
+      } else {
+        wantsVoice = false;
+        replyText = text.trim();
+        spokenText = replyText;
+        console.log('[raw]', { chatId: realNumber, text });
+      }
 
       const targetDelayMs = humanDelayMs(wantsVoice ? spokenText.length : replyText.length);
       try {
@@ -167,10 +186,10 @@ export function registerAutoReplyHandler() {
       }
 
       try {
-        // Store the raw model output (VOICE: line included), not the stripped replyText —
-        // otherwise every past turn shown back to the model omits the required format,
-        // and the model pattern-matches its own history over the system prompt's rule.
-        await saveMessage(chatId, msg.body, text, model);
+        // replyText, not the raw model output — when send_voice_reply was called, `text`
+        // (the model's own "content") can be empty/null, since the reply lives in the tool
+        // call's arguments instead.
+        await saveMessage(chatId, msg.body, replyText, model);
       } catch (err) {
         console.warn('[history] could not persist this turn:', err.message);
       }
