@@ -30,7 +30,7 @@ const openrouter = new OpenRouterProvider('openrouter', ENDPOINT, LLM_RATE_LIMIT
 
 export async function getAIReply(
   messages,
-  { apiKey = process.env.OPENROUTER_API_KEY, models = FREE_MODELS, fetchImpl = fetch, paced = true, tools, toolChoice } = {},
+  { apiKey = process.env.OPENROUTER_API_KEY, models = FREE_MODELS, fetchImpl = fetch, paced = true, tools, toolChoice, signal } = {},
 ) {
-  return openrouter.getReply(messages, { apiKey, models, fetchImpl, paced, tools, toolChoice });
+  return openrouter.getReply(messages, { apiKey, models, fetchImpl, paced, tools, toolChoice, signal });
 }

@@ -24,10 +24,14 @@ export class LlmProvider {
     return Date.now() + this.rateLimitCooldownMs;
   }
 
-  async getReply(messages, { apiKey, models, fetchImpl = fetch, paced = true, tools, toolChoice } = {}) {
+  async getReply(messages, { apiKey, models, fetchImpl = fetch, paced = true, tools, toolChoice, signal: externalSignal } = {}) {
     let lastError = new Error(`no ${this.name} models available (all on rate-limit cooldown)`);
 
     for (const entry of models) {
+      // An external abort (a stop command) means give up entirely — not "try the next
+      // model," which is what every other failure path here does.
+      if (externalSignal?.aborted) throw new Error(`${this.name} request aborted`);
+
       const model = this.modelId(entry);
       const cooldown = this.cooldownUntil.get(model);
       if (cooldown && Date.now() < cooldown) {
@@ -37,8 +41,9 @@ export class LlmProvider {
 
       if (paced) await this.pace(entry);
 
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), LLM_REQUEST_TIMEOUT_MS);
+      const timeoutController = new AbortController();
+      const timeout = setTimeout(() => timeoutController.abort(), LLM_REQUEST_TIMEOUT_MS);
+      const signal = externalSignal ? AbortSignal.any([externalSignal, timeoutController.signal]) : timeoutController.signal;
 
       try {
         const res = await fetchImpl(this.endpoint, {
@@ -48,7 +53,7 @@ export class LlmProvider {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ model, messages, ...(tools?.length ? { tools } : {}), ...(toolChoice ? { tool_choice: toolChoice } : {}) }),
-          signal: controller.signal,
+          signal,
         });
 
         if (!res.ok) {
@@ -73,6 +78,7 @@ export class LlmProvider {
       } catch (err) {
         lastError = err;
         console.warn(`[${this.name}] model ${model} failed: ${err.message}`);
+        if (externalSignal?.aborted) throw lastError;
       } finally {
         clearTimeout(timeout);
       }

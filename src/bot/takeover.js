@@ -1,5 +1,6 @@
 import { HUMAN_TAKEOVER_MINUTES, TAKEOVER_DURATION_PROMPT, TAKEOVER_MAX_WORDS_FOR_BARE_COMMAND } from '../tools/config.js';
 import { getReply, logModelUsage } from '../models/getReply.js';
+import { abortAllLlmRequests } from '../models/llmRequestRegistry.js';
 import { stripCodeFence } from '../models/parseModelJson.js';
 import { replyInSelfChat } from './selfChat.js';
 import { formatIST } from '../tools/time.js';
@@ -75,6 +76,11 @@ async function extractStopDuration(body) {
 // false if it wasn't a takeover command at all.
 export async function tryHandleTakeoverCommand(body) {
   if (isTakeoverPhrase(body, STOP_REGEX)) {
+    // Cancel every in-flight LLM request FIRST, before this command's own duration-parsing
+    // call starts (that call gets its own fresh, untracked-by-this-abort controller).
+    abortAllLlmRequests('auto-reply stopped');
+    console.log('[takeover] stop command received — aborted all in-flight LLM requests');
+
     const minutes = (await extractStopDuration(body)) ?? HUMAN_TAKEOVER_MINUTES;
     const pausedUntil = takeoverState.pauseFor(minutes);
     const resumeAt = formatIST(new Date(pausedUntil));

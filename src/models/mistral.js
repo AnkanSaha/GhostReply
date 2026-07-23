@@ -24,7 +24,7 @@ const mistral = new MistralProvider('mistral', ENDPOINT, LLM_RATE_LIMIT_COOLDOWN
 
 export async function getMistralReply(
   messages,
-  { apiKey = process.env.MISTRAL_API_KEY, models = MISTRAL_MODELS, fetchImpl = fetch, paced = true, tools, toolChoice } = {},
+  { apiKey = process.env.MISTRAL_API_KEY, models = MISTRAL_MODELS, fetchImpl = fetch, paced = true, tools, toolChoice, signal } = {},
 ) {
-  return mistral.getReply(messages, { apiKey, models, fetchImpl, paced, tools, toolChoice });
+  return mistral.getReply(messages, { apiKey, models, fetchImpl, paced, tools, toolChoice, signal });
 }
