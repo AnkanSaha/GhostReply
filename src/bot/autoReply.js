@@ -14,24 +14,6 @@ import { formatIST } from '../tools/time.js';
 
 const { MessageMedia } = pkg;
 
-// In a conversation with Bengali/Banglish-flavored history, the model drifts back toward
-// that established momentum even when the current message is plain English — verified live:
-// a generic "match this message's language" reminder was not enough to stop it, but stating
-// the classification outright ("this message is in English") was. Bengali/Devanagari script
-// is unambiguous; Banglish/Hinglish (Latin script) is flagged by the presence of common
-// transliterated words, so a Latin-script message with none of them is treated as English.
-const BENGALI_SCRIPT = /[ঀ-৿]/;
-const DEVANAGARI_SCRIPT = /[ऀ-ॿ]/;
-const TRANSLITERATION_MARKERS = /\b(ki|re|bhai|acho|achi|achen|korbo|korchi|korle|korte|hobe|hoyeche|keno|tui|tumi|apni|kemon|bolo|bol|dhur|arre|yaar|kya|hai|hain|nahi|nahin|kar|karo|kaisa|kaise|kahan|thik|acha|accha)\b/i;
-
-function isClearlyEnglish(text) {
-  if (BENGALI_SCRIPT.test(text) || DEVANAGARI_SCRIPT.test(text)) return false;
-  return !TRANSLITERATION_MARKERS.test(text);
-}
-
-const ENGLISH_REMINDER =
-  '\n\n[This message is in English — reply only in English, plain casual text, no bold/bullets/headers, regardless of what language earlier messages in this chat used.]';
-
 export function registerAutoReplyHandler() {
   client.on('message', async (msg) => {
     try {
@@ -103,7 +85,7 @@ export function registerAutoReplyHandler() {
       const promptMessages = [
         { role: 'system', content: PERSONA },
         ...historyMessages,
-        { role: 'user', content: isClearlyEnglish(msg.body) ? `${msg.body}${ENGLISH_REMINDER}` : msg.body },
+        { role: 'user', content: msg.body },
       ];
       console.log('[prompt]', { chatId: realNumber, messages: promptMessages });
 
